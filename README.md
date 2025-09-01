@@ -4,11 +4,12 @@ A refreshed React project featuring a single interactive landing page inspired b
 
 ## Development
 
-Install dependencies and start the development server:
+Install dependencies and start the development server (avoids symlink issues):
 
 ```bash
-npm install
-npm start
+# If your filesystem disallows symlinks, use --no-bin-links
+npm install --no-bin-links
+npm run dev
 ```
 
 ## Testing
@@ -31,12 +32,13 @@ Replace `username` in `package.json`'s `homepage` field with your GitHub usernam
 npm run deploy
 ```
 
-This builds the app and publishes the `build/` directory to the `gh-pages` branch for hosting on GitHub Pages.
+This builds the app and publishes the `dist/` directory to the `gh-pages` branch for hosting on GitHub Pages.
 
 ## Project Structure
 
-- `src/` contains the React components.
-- `public/` hosts the HTML template and static assets.
+- `src/` contains the React components and theme.
+- `index.html` is the Vite HTML entry.
+- `public/` hosts static assets (if any).
 - `AGENTS.md` describes conventions for contributors.
 
 Feel free to extend this foundation with new pages and features.
