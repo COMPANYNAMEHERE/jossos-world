@@ -1,44 +1,61 @@
 # Jossos World
 
-A refreshed React project featuring a single interactive landing page inspired by Android's Material Design. The page introduces the project and provides a framework for future expansion.
+Check it out! It's Jossos world. Nostalgicoding a single myspace page. But not really.
 
-## Development
+It is still a massive Work In Progress and vibecoded AF, might never get done. Why are you spending your time reading this while you could've been looking around other cool projects on github, like Transcribe Monkey on my profile if you're bored!
 
-Install dependencies and start the development server (avoids symlink issues):
+<details>
+<summary><strong>Setup & Commands</strong> (click to expand)</summary>
 
-```bash
-# If your filesystem disallows symlinks, use --no-bin-links
-npm install --no-bin-links
-npm run dev
-```
+Prerequisites: Node 18+.
 
-## Testing
+- Install (on filesystems that disallow symlinks, use the flag):
 
-```bash
-npm test
-```
+  ```bash
+  npm install --no-bin-links
+  ```
 
-## Building for production
+- Development server:
 
-```bash
-npm run build
-```
+  ```bash
+  npm run dev
+  ```
 
-## Deploying to GitHub Pages
+- Tests:
 
-Replace `username` in `package.json`'s `homepage` field with your GitHub username, then run:
+  ```bash
+  npm test
+  ```
 
-```bash
-npm run deploy
-```
+- Build:
 
-This builds the app and publishes the `dist/` directory to the `gh-pages` branch for hosting on GitHub Pages.
+  ```bash
+  npm run build
+  ```
+
+- Deploy to GitHub Pages:
+  1) Set `homepage` in `package.json` to `https://<username>.github.io/jossos-world`.
+  2) Build and deploy:
+
+  ```bash
+  npm run deploy
+  ```
+
+  This publishes the `dist/` folder to the `gh-pages` branch.
+
+</details>
 
 ## Project Structure
 
-- `src/` contains the React components and theme.
-- `index.html` is the Vite HTML entry.
-- `public/` hosts static assets (if any).
-- `AGENTS.md` describes conventions for contributors.
+- `src/pages/` — route-level views (e.g., `LandingPage.jsx`).
+- `src/components/` — reusable UI building blocks.
+- `src/hooks/` — custom React hooks.
+- `src/lib/` — small utilities and pure helpers.
+- `src/api/` — API clients/fetchers.
+- `src/styles/` — theme and styling helpers (e.g., `theme.js`).
+- `src/assets/` — images and media.
+- `src/config.js` — tweakable runtime config (debug key, polling rate, etc.).
+- `index.html`, `src/main.jsx`, `src/App.jsx` — app entry and routing.
+- `AGENTS.md` — contribution and code-structure guidelines.
 
-Feel free to extend this foundation with new pages and features.
+Built with React + Vite + MUI, kept intentionally lightweight and modern.
