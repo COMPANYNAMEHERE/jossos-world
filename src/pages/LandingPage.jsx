@@ -5,14 +5,16 @@ import Container from '@mui/material/Container';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import { TOP_ZONE_FRAC, HOLD_POLL_MS, DEBUG_TOGGLE_KEY, FPS_UPDATE_MS } from '../config.js';
+import { TOP_ZONE_FRAC, HOLD_POLL_MS, DEBUG_TOGGLE_KEY, FPS_UPDATE_MS, SPACE_MODE, STARS_COUNT, STARS_SPEED, STARS_TWINKLE, GRAVITY_Y } from '../config.js';
+import { setTransferPayload } from '../lib/transfer.js';
+import Starfield from '../components/Starfield.jsx';
 
-// Physics constants
-const GRAVITY = 2000; // px/s^2
-const RESTITUTION = 0.55; // bounce factor
-const LINEAR_DAMP = 0.992; // linear damping per fixed step
-const ANGULAR_DAMP = 0.985; // angular damping per fixed step
-const GROUND_FRICTION = 0.86; // applied when hitting the ground
+// Physics constants (space tuned)
+const GRAVITY = GRAVITY_Y; // px/s^2 (slight downward)
+const RESTITUTION = 0.88; // bouncier in space
+const LINEAR_DAMP = 0.998; // very low linear damping
+const ANGULAR_DAMP = 0.995; // very low angular damping
+const GROUND_FRICTION = 0.99; // almost no friction on ground
 const MAX_SPRING_FORCE = 20000; // cap dragging force magnitude
 const DRAG_K = 3000; // spring stiffness
 const DRAG_C = 120; // damping
@@ -50,6 +52,16 @@ function getExtents(cx, cy, hw, hh, angle) {
     if (y > maxY) maxY = y;
   }
   return { minX, maxX, minY, maxY };
+}
+
+// Optimized helpers using precomputed cos/sin when available
+function rotateCS(x, y, c, s) {
+  return { x: c * x - s * y, y: s * x + c * y };
+}
+function getExtentsCS(cx, cy, hw, hh, c, s) {
+  const ex = Math.abs(c) * hw + Math.abs(s) * hh;
+  const ey = Math.abs(s) * hw + Math.abs(c) * hh;
+  return { minX: cx - ex, maxX: cx + ex, minY: cy - ey, maxY: cy + ey };
 }
 
 export default function LandingPage() {
@@ -259,61 +271,61 @@ export default function LandingPage() {
       if (debug) recordFrame(dt);
       dt = Math.min(dt, 0.05);
       accRef.current += dt;
-      // compute pointer instantaneous velocities once per frame
-      const dragVel = new Map();
-      for (const [id, rec] of dragMapRef.current) {
+      // compute pointer instantaneous velocities once per frame (store on records)
+      for (const [, rec] of dragMapRef.current) {
         const pdt = Math.max(0.001, (now - rec.prevT) / 1000);
-        const vx = (rec.px - rec.prevPx) / pdt;
-        const vy = (rec.py - rec.prevPy) / pdt;
-        dragVel.set(id, { vx, vy });
+        rec.vx = (rec.px - rec.prevPx) / pdt;
+        rec.vy = (rec.py - rec.prevPy) / pdt;
         rec.prevPx = rec.px;
         rec.prevPy = rec.py;
         rec.prevT = now;
       }
 
+      // clone once and mutate in place across fixed steps
+      let curr = bodiesRef.current.map((b) => ({ ...b }));
       while (accRef.current >= FIXED_DT) {
         accRef.current -= FIXED_DT;
-        // integrate one fixed step
-        const next = bodiesRef.current.map((b) => {
+        for (let i = 0; i < curr.length; i++) {
+          const b = curr[i];
           let { cx, cy, vx, vy, angle, omega, w, h, m, I } = b;
           let Fx = 0, Fy = 0, torque = 0;
 
-          // gravity with safer upward-assist: only inside viewport and when moving up
+          // gravity: in space mode, no upward assist; otherwise keep top-zone blend
           const zoneH = TOP_ZONE_FRAC * viewport.h;
-          const ext = getExtents(cx, cy, w / 2, h / 2, angle);
+          const c = Math.cos(angle), s = Math.sin(angle);
+          const ext = getExtentsCS(cx, cy, w / 2, h / 2, c, s);
           let geff = GRAVITY; // default downward
-          if (ext.minY >= 0 && ext.minY < zoneH && vy < 0) {
-            const t = 1 - ext.minY / zoneH; // 1 at very top, 0 at zone boundary
+          if (!SPACE_MODE && zoneH > 0 && ext.minY >= 0 && ext.minY < zoneH && vy < 0) {
+            const t = 1 - ext.minY / Math.max(1, zoneH); // 1 at very top, 0 at boundary
             geff = GRAVITY * (1 - 2 * t);
           }
           Fy += m * geff;
 
           // dragging spring at anchor if held
-          if (b.holding && dragMapRef.current.has(b.id)) {
+          if (b.holding) {
             const rec = dragMapRef.current.get(b.id);
-            const vrec = dragVel.get(b.id) || { vx: 0, vy: 0 };
-            const { x: awx, y: awy } = rotate(b.ax, b.ay, angle); // world offset from center to anchor
-            const axw = cx + awx;
-            const ayw = cy + awy;
-            const tx = rec.px;
-            const ty = rec.py;
-            const ex = tx - axw;
-            const ey = ty - ayw;
-            // velocity of anchor point: v + omega x r
-            const vax = vx + (-omega) * awy;
-            const vay = vy + (omega) * awx;
-            const evx = vrec.vx - vax;
-            const evy = vrec.vy - vay;
-            let FxAnchor = DRAG_K * ex + DRAG_C * evx;
-            let FyAnchor = DRAG_K * ey + DRAG_C * evy;
-            const mag = Math.hypot(FxAnchor, FyAnchor);
-            if (mag > MAX_SPRING_FORCE) {
-              const s = MAX_SPRING_FORCE / mag;
-              FxAnchor *= s; FyAnchor *= s;
+            if (rec) {
+              const aw = rotateCS(b.ax, b.ay, c, s); // world offset from center to anchor
+              const axw = cx + aw.x;
+              const ayw = cy + aw.y;
+              const ex = rec.px - axw;
+              const ey = rec.py - ayw;
+              // velocity of anchor point: v + omega x r
+              const vax = vx + (-omega) * aw.y;
+              const vay = vy + (omega) * aw.x;
+              const evx = (rec.vx || 0) - vax;
+              const evy = (rec.vy || 0) - vay;
+              let FxAnchor = DRAG_K * ex + DRAG_C * evx;
+              let FyAnchor = DRAG_K * ey + DRAG_C * evy;
+              const mag = Math.hypot(FxAnchor, FyAnchor);
+              if (mag > MAX_SPRING_FORCE) {
+                const s = MAX_SPRING_FORCE / mag;
+                FxAnchor *= s; FyAnchor *= s;
+              }
+              Fx += FxAnchor; Fy += FyAnchor;
+              // torque = r x F (2D)
+              torque += aw.x * FyAnchor - aw.y * FxAnchor;
             }
-            Fx += FxAnchor; Fy += FyAnchor;
-            // torque = r x F (2D)
-            torque += awx * FyAnchor - awy * FxAnchor;
           }
 
           // integrate
@@ -328,14 +340,14 @@ export default function LandingPage() {
           angle += omega * FIXED_DT;
 
           // borders collision using rotated extents; open top for throw-out detection
-          const ext2 = getExtents(cx, cy, w / 2, h / 2, angle);
+          const ext2 = getExtentsCS(cx, cy, w / 2, h / 2, Math.cos(angle), Math.sin(angle));
           if (ext2.minX < 0) { cx += -ext2.minX; vx = Math.abs(vx) * RESTITUTION; }
           if (ext2.maxX > viewport.w) { cx -= (ext2.maxX - viewport.w); vx = -Math.abs(vx) * RESTITUTION; }
           if (ext2.maxY > viewport.h) {
             cy -= (ext2.maxY - viewport.h);
             vy = -Math.abs(vy) * RESTITUTION;
             vx *= GROUND_FRICTION;
-            omega *= 0.9;
+            omega *= ANGULAR_DAMP;
           }
 
           // damping
@@ -349,20 +361,34 @@ export default function LandingPage() {
           if (ext2.maxY >= 0) seen = true; // has been visible at least once
           if (b.type === 'word') {
             if (seen && ext2.maxY < 0) {
-              if (!outAt) outAt = now;
+              if (!outAt) {
+                outAt = now;
+                // capture exit velocity exactly at first leave
+                b.exitVx = vx;
+                b.exitVy = vy;
+              }
               if (outAt && now - outAt >= 2000) {
                 runningRef.current = false;
+                // transfer velocity/label to the next page before navigating
+                try {
+                  const tvx = b.exitVx ?? vx;
+                  const tvy = b.exitVy ?? vy;
+                  setTransferPayload({ route: b.route, id: b.id, label: b.label, vx: tvx, vy: tvy });
+                } catch (_) {}
                 setTimeout(() => navigate(b.route), 0);
               }
             } else {
               outAt = null;
+              b.exitVx = undefined;
+              b.exitVy = undefined;
             }
           }
 
-          return { ...b, cx, cy, vx, vy, angle, omega, outAt, seen };
-        });
-        setBodies(next);
+          // write back into curr
+          b.cx = cx; b.cy = cy; b.vx = vx; b.vy = vy; b.angle = angle; b.omega = omega; b.outAt = outAt; b.seen = seen;
+        }
       }
+      setBodies(curr);
 
       if (runningRef.current) requestAnimationFrame(step);
     };
@@ -380,12 +406,15 @@ export default function LandingPage() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg,#0f2027 0%,#203a43 50%,#2c5364 100%)',
+        background: SPACE_MODE ? '#030711' : 'linear-gradient(135deg,#0f2027 0%,#203a43 50%,#2c5364 100%)',
         overflow: 'hidden'
       }}
       onMouseMove={onMouseMoveLanding}
       onMouseLeave={onMouseLeaveLanding}
     >
+      {SPACE_MODE && (
+        <Starfield count={STARS_COUNT} speed={STARS_SPEED} twinkle={STARS_TWINKLE} />
+      )}
       {debug && (
         <Box sx={{ position: 'fixed', top: 8, left: 8, px: 1, py: 0.5, bgcolor: 'rgba(0,0,0,0.6)', color: '#9effa0', fontFamily: 'monospace', fontSize: 12, borderRadius: 1, zIndex: 2000 }}>
           <div>FPS: {fps.toFixed(0)}</div>
@@ -489,8 +518,10 @@ export default function LandingPage() {
             </Box>
           ))}
 
-          {/* Ground indicator */}
-          <Box sx={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, bgcolor: 'rgba(255,255,255,0.08)' }} />
+          {/* Ground indicator (hidden in space mode) */}
+          {!SPACE_MODE && (
+            <Box sx={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, bgcolor: 'rgba(255,255,255,0.08)' }} />
+          )}
         </>
       )}
     </Box>

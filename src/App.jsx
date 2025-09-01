@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage.jsx';
+import VideosPage from './pages/VideosPage.jsx';
 
 function Placeholder({ title }) {
   return (
@@ -14,7 +15,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/blogs" element={<Placeholder title="Blogs" />} />
-      <Route path="/videos" element={<Placeholder title="Videos" />} />
+      <Route path="/videos" element={<VideosPage />} />
     </Routes>
   );
 }
