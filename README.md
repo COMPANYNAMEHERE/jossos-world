@@ -1,70 +1,61 @@
-# Getting Started with Create React App
+# Jossos World
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Check it out! It's Jossos world. Nostalgicoding a single myspace page. But not really.
 
-## Available Scripts
+It is still a massive Work In Progress and vibecoded AF, might never get done. Why are you spending your time reading this while you could've been looking around other cool projects on github, like Transcribe Monkey on my profile if you're bored!
 
-In the project directory, you can run:
+<details>
+<summary><strong>Setup & Commands</strong> (click to expand)</summary>
 
-### `npm start`
+Prerequisites: Node 18+.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- Install (on filesystems that disallow symlinks, use the flag):
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+  ```bash
+  npm install --no-bin-links
+  ```
 
-### `npm test`
+- Development server:
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+  ```bash
+  npm run dev
+  ```
 
-### `npm run build`
+- Tests:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+  ```bash
+  npm test
+  ```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+- Build:
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+  ```bash
+  npm run build
+  ```
 
-### `npm run eject`
+- Deploy to GitHub Pages:
+  1) Set `homepage` in `package.json` to `https://<username>.github.io/jossos-world`.
+  2) Build and deploy:
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+  ```bash
+  npm run deploy
+  ```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+  This publishes the `dist/` folder to the `gh-pages` branch.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+</details>
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## Project Structure
 
-## Learn More
+- `src/pages/` — route-level views (e.g., `LandingPage.jsx`).
+- `src/components/` — reusable UI building blocks.
+- `src/hooks/` — custom React hooks.
+- `src/lib/` — small utilities and pure helpers.
+- `src/api/` — API clients/fetchers.
+- `src/styles/` — theme and styling helpers (e.g., `theme.js`).
+- `src/assets/` — images and media.
+- `src/config.js` — tweakable runtime config (debug key, polling rate, etc.).
+- `index.html`, `src/main.jsx`, `src/App.jsx` — app entry and routing.
+- `AGENTS.md` — contribution and code-structure guidelines.
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Built with React + Vite + MUI, kept intentionally lightweight and modern.
