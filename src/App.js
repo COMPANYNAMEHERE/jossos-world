@@ -1,15 +1,7 @@
-import React, { useState } from 'react';
-import Landing from './Landing';
-import MainPage from './MainPage';
+import LandingPage from './LandingPage';
 
 function App() {
-  const [showMainPage, setShowMainPage] = useState(false);
-
-  const handleAnimationComplete = () => {
-    setShowMainPage(true);
-  };
-
-  return showMainPage ? <MainPage /> : <Landing onAnimationComplete={handleAnimationComplete} />;
+  return <LandingPage />;
 }
 
 export default App;
