@@ -5,18 +5,18 @@ import Container from '@mui/material/Container';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import { TOP_ZONE_FRAC, HOLD_POLL_MS, DEBUG_TOGGLE_KEY, FPS_UPDATE_MS } from '../config.js';
+import {
+  TOP_ZONE_FRAC, HOLD_POLL_MS, DEBUG_TOGGLE_KEY, FPS_UPDATE_MS, RESET_SCENE_KEY,
+  GRAVITY_Y, TOP_ZONE_UPWARD_MULTIPLIER,
+  RESTITUTION, LINEAR_DAMP, ANGULAR_DAMP, GROUND_FRICTION,
+  MAX_SPRING_FORCE, DRAG_K, DRAG_C, FIXED_DT,
+  COLLISION_E, COLLISION_FRICTION, SOLVER_ITER, PENETRATION_SLOP, POSITION_BIAS,
+  GROUND_UPRIGHT_STRENGTH, GROUND_ANGULAR_FRICTION, UPRIGHT_SNAP_RAD, VY_REST_THRESH, UPRIGHT_HORIZONTAL_BIAS,
+  UPRIGHT_TORQUE_K, UPRIGHT_TORQUE_DAMP
+} from '../config/index.js';
 
-// Physics constants
-const GRAVITY = 2000; // px/s^2
-const RESTITUTION = 0.55; // bounce factor
-const LINEAR_DAMP = 0.992; // linear damping per fixed step
-const ANGULAR_DAMP = 0.985; // angular damping per fixed step
-const GROUND_FRICTION = 0.86; // applied when hitting the ground
-const MAX_SPRING_FORCE = 20000; // cap dragging force magnitude
-const DRAG_K = 3000; // spring stiffness
-const DRAG_C = 120; // damping
-const FIXED_DT = 1 / 120; // fixed physics step
+// Physics constants (sourced from config)
+const GRAVITY = GRAVITY_Y; // alias for readability in this module
 
 const WORDS = [
   { id: 'blogs', label: 'BLOGS', route: '/blogs' },
@@ -34,22 +34,31 @@ function rotate(x, y, angle) {
 }
 
 function getExtents(cx, cy, hw, hh, angle) {
-  const verts = [
-    rotate(-hw, -hh, angle),
-    rotate(hw, -hh, angle),
-    rotate(hw, hh, angle),
-    rotate(-hw, hh, angle)
-  ];
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const v of verts) {
-    const x = cx + v.x;
-    const y = cy + v.y;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  }
-  return { minX, maxX, minY, maxY };
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const ex = Math.abs(c) * hw + Math.abs(s) * hh;
+  const ey = Math.abs(s) * hw + Math.abs(c) * hh;
+  return { minX: cx - ex, maxX: cx + ex, minY: cy - ey, maxY: cy + ey };
+}
+function getExtentsCS(cx, cy, hw, hh, c, s) {
+  const ex = Math.abs(c) * hw + Math.abs(s) * hh;
+  const ey = Math.abs(s) * hw + Math.abs(c) * hh;
+  return { minX: cx - ex, maxX: cx + ex, minY: cy - ey, maxY: cy + ey };
+}
+
+function normalizeAngle(a) {
+  let x = a;
+  const twoPi = Math.PI * 2;
+  x = ((x + Math.PI) % twoPi + twoPi) % twoPi - Math.PI;
+  return x;
+}
+function shortestAngleDelta(from, to) {
+  const a = normalizeAngle(from);
+  const b = normalizeAngle(to);
+  let d = b - a;
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return d;
 }
 
 export default function LandingPage() {
@@ -77,8 +86,13 @@ export default function LandingPage() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.key || '').toLowerCase() === (DEBUG_TOGGLE_KEY || 'o').toLowerCase()) {
+      const key = (e.key || '').toLowerCase();
+      if (key === (DEBUG_TOGGLE_KEY || 'o').toLowerCase()) {
         setDebug((d) => !d);
+      }
+      if (key === (RESET_SCENE_KEY || 'r').toLowerCase()) {
+        // Reset the scene bodies without leaving physics mode
+        setBodies(makeInitialBodies());
       }
     };
     window.addEventListener('keydown', onKey);
@@ -153,8 +167,8 @@ export default function LandingPage() {
     setCount(3);
   };
 
-  // Bodies state (center-based positions)
-  const initialBodies = useMemo(() => {
+  // Factory to create initial bodies (center-based positions)
+  const makeInitialBodies = () => {
     const bodies = [];
     const cw = spawnCard?.width ?? Math.min(420, Math.max(300, viewport.w * 0.5));
     const ch = spawnCard?.height ?? 220;
@@ -179,7 +193,9 @@ export default function LandingPage() {
       });
     }
     return bodies;
-  }, [viewport.w, viewport.h, spawnCard]);
+  };
+
+  const initialBodies = useMemo(() => makeInitialBodies(), [viewport.w, viewport.h, spawnCard]);
 
   const [bodies, setBodies] = useState(initialBodies);
   const bodiesRef = useRef(bodies);
@@ -259,13 +275,11 @@ export default function LandingPage() {
       if (debug) recordFrame(dt);
       dt = Math.min(dt, 0.05);
       accRef.current += dt;
-      // compute pointer instantaneous velocities once per frame
-      const dragVel = new Map();
+      // compute pointer instantaneous velocities once per frame (store on records)
       for (const [id, rec] of dragMapRef.current) {
         const pdt = Math.max(0.001, (now - rec.prevT) / 1000);
-        const vx = (rec.px - rec.prevPx) / pdt;
-        const vy = (rec.py - rec.prevPy) / pdt;
-        dragVel.set(id, { vx, vy });
+        rec.vx = (rec.px - rec.prevPx) / pdt;
+        rec.vy = (rec.py - rec.prevPy) / pdt;
         rec.prevPx = rec.px;
         rec.prevPy = rec.py;
         rec.prevT = now;
@@ -280,19 +294,23 @@ export default function LandingPage() {
 
           // gravity with safer upward-assist: only inside viewport and when moving up
           const zoneH = TOP_ZONE_FRAC * viewport.h;
-          const ext = getExtents(cx, cy, w / 2, h / 2, angle);
+          const c = Math.cos(angle), s = Math.sin(angle);
+          const ext = getExtentsCS(cx, cy, w / 2, h / 2, c, s);
           let geff = GRAVITY; // default downward
           if (ext.minY >= 0 && ext.minY < zoneH && vy < 0) {
             const t = 1 - ext.minY / zoneH; // 1 at very top, 0 at zone boundary
-            geff = GRAVITY * (1 - 2 * t);
+            const mult = 1 + (TOP_ZONE_UPWARD_MULTIPLIER - 1) * t; // lerp 1 -> multiplier
+            geff = GRAVITY * mult;
           }
           Fy += m * geff;
 
           // dragging spring at anchor if held
           if (b.holding && dragMapRef.current.has(b.id)) {
             const rec = dragMapRef.current.get(b.id);
-            const vrec = dragVel.get(b.id) || { vx: 0, vy: 0 };
-            const { x: awx, y: awy } = rotate(b.ax, b.ay, angle); // world offset from center to anchor
+            const vrec = rec || { vx: 0, vy: 0 };
+            // world offset from center to anchor using precomputed cos/sin
+            const awx = c * b.ax - s * b.ay;
+            const awy = s * b.ax + c * b.ay;
             const axw = cx + awx;
             const ayw = cy + awy;
             const tx = rec.px;
@@ -302,8 +320,8 @@ export default function LandingPage() {
             // velocity of anchor point: v + omega x r
             const vax = vx + (-omega) * awy;
             const vay = vy + (omega) * awx;
-            const evx = vrec.vx - vax;
-            const evy = vrec.vy - vay;
+            const evx = (vrec.vx || 0) - vax;
+            const evy = (vrec.vy || 0) - vay;
             let FxAnchor = DRAG_K * ex + DRAG_C * evx;
             let FyAnchor = DRAG_K * ey + DRAG_C * evy;
             const mag = Math.hypot(FxAnchor, FyAnchor);
@@ -327,17 +345,6 @@ export default function LandingPage() {
           omega += alpha * FIXED_DT;
           angle += omega * FIXED_DT;
 
-          // borders collision using rotated extents; open top for throw-out detection
-          const ext2 = getExtents(cx, cy, w / 2, h / 2, angle);
-          if (ext2.minX < 0) { cx += -ext2.minX; vx = Math.abs(vx) * RESTITUTION; }
-          if (ext2.maxX > viewport.w) { cx -= (ext2.maxX - viewport.w); vx = -Math.abs(vx) * RESTITUTION; }
-          if (ext2.maxY > viewport.h) {
-            cy -= (ext2.maxY - viewport.h);
-            vy = -Math.abs(vy) * RESTITUTION;
-            vx *= GROUND_FRICTION;
-            omega *= 0.9;
-          }
-
           // damping
           vx *= LINEAR_DAMP;
           vy *= LINEAR_DAMP;
@@ -346,6 +353,8 @@ export default function LandingPage() {
           // out-of-screen top detection with seen-on-screen guard
           let outAt = b.outAt ?? null;
           let seen = b.seen ?? false;
+          // compute extents for top detection (top is open)
+          const ext2 = getExtentsCS(cx, cy, w / 2, h / 2, c, s);
           if (ext2.maxY >= 0) seen = true; // has been visible at least once
           if (b.type === 'word') {
             if (seen && ext2.maxY < 0) {
@@ -361,7 +370,11 @@ export default function LandingPage() {
 
           return { ...b, cx, cy, vx, vy, angle, omega, outAt, seen };
         });
-        setBodies(next);
+        // Resolve pairwise collisions (AABB approximation with impulses)
+        const collided = resolveCollisions(next);
+        // Then handle borders with awareness of push direction from collisions
+        const bordered = resolveBorders(collided);
+        setBodies(bordered);
       }
 
       if (runningRef.current) requestAnimationFrame(step);
@@ -370,6 +383,164 @@ export default function LandingPage() {
     requestAnimationFrame(step);
     return () => { runningRef.current = false; };
   }, [phase, initialBodies, navigate, viewport.h, viewport.w, debug]);
+
+  function resolveCollisions(arr) {
+    const bs = arr; // mutate in place (arr is a fresh array for this frame)
+    for (let iter = 0; iter < SOLVER_ITER; iter++) {
+      for (let i = 0; i < bs.length; i++) {
+        for (let j = i + 1; j < bs.length; j++) {
+          const a = bs[i];
+          const b = bs[j];
+
+          // Compute overlap using rotated AABBs
+          const ea = getExtents(a.cx, a.cy, a.w / 2, a.h / 2, a.angle);
+          const eb = getExtents(b.cx, b.cy, b.w / 2, b.h / 2, b.angle);
+          const overlapX = Math.min(ea.maxX, eb.maxX) - Math.max(ea.minX, eb.minX);
+          const overlapY = Math.min(ea.maxY, eb.maxY) - Math.max(ea.minY, eb.minY);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+
+          // Normal is axis of minimum penetration, oriented from a to b
+          let nx = 0, ny = 0, pen = 0;
+          if (overlapX < overlapY) {
+            pen = overlapX;
+            nx = (b.cx - a.cx) >= 0 ? 1 : -1;
+            ny = 0;
+          } else {
+            pen = overlapY;
+            ny = (b.cy - a.cy) >= 0 ? 1 : -1;
+            nx = 0;
+          }
+
+          const aHeld = !!a.holding;
+          const bHeld = !!b.holding;
+          const invMa = aHeld ? 0 : 1 / a.m;
+          const invMb = bHeld ? 0 : 1 / b.m;
+          const invSum = invMa + invMb;
+          if (invSum === 0) continue; // both kinematic (unlikely)
+
+          // Positional correction with slop and bias
+          // When one body is held, fully resolve penetration (no slop, full bias)
+          const heldPair = aHeld || bHeld;
+          const usedSlop = heldPair ? 0 : PENETRATION_SLOP;
+          const usedBias = heldPair ? 1.0 : POSITION_BIAS;
+          const corr = Math.max(0, pen - usedSlop) * usedBias;
+          const moveA = (invMa / invSum) * corr;
+          const moveB = (invMb / invSum) * corr;
+          a.cx -= nx * moveA; a.cy -= ny * moveA;
+          b.cx += nx * moveB; b.cy += ny * moveB;
+
+          // Track push direction per axis for border handling
+          if (nx !== 0) {
+            a._pushX = (a._pushX || 0) + (-nx);
+            b._pushX = (b._pushX || 0) + (nx);
+          }
+          if (ny !== 0) {
+            a._pushY = (a._pushY || 0) + (-ny);
+            b._pushY = (b._pushY || 0) + (ny);
+          }
+
+          // Relative velocity along normal
+          const rvx = b.vx - a.vx;
+          const rvy = b.vy - a.vy;
+          const vrn = rvx * nx + rvy * ny;
+          if (vrn < 0) {
+            const j = (-(1 + COLLISION_E) * vrn) / invSum;
+            const jx = j * nx, jy = j * ny;
+            a.vx -= jx * invMa; a.vy -= jy * invMa;
+            b.vx += jx * invMb; b.vy += jy * invMb;
+
+            // Coulomb friction along tangent (provides rubbing drag)
+            const tx = -ny, ty = nx;
+            const vrt = rvx * tx + rvy * ty;
+            let jt = -vrt / invSum;
+            const maxFriction = Math.abs(COLLISION_FRICTION * j);
+            if (jt > maxFriction) jt = maxFriction;
+            if (jt < -maxFriction) jt = -maxFriction;
+            const jtx = jt * tx, jty = jt * ty;
+            a.vx -= jtx * invMa; a.vy -= jty * invMa;
+            b.vx += jtx * invMb; b.vy += jty * invMb;
+
+            // Mild angular damping on impact for non-held bodies
+            if (!aHeld) a.omega *= 0.985;
+            if (!bHeld) b.omega *= 0.985;
+          }
+        }
+      }
+    }
+    return bs;
+  }
+
+  function resolveBorders(arr) {
+    const bs = arr; // mutate in place
+    for (const b of bs) {
+      const ext = getExtents(b.cx, b.cy, b.w / 2, b.h / 2, b.angle);
+      // Left wall
+      if (ext.minX < 0) {
+        b.cx += -ext.minX;
+        const pushingIn = (b.vx < 0) || ((b._pushX || 0) < 0);
+        if (pushingIn) {
+          b.vx = 0;
+        } else {
+          b.vx = Math.abs(b.vx) * RESTITUTION;
+        }
+      }
+      // Right wall
+      if (ext.maxX > viewport.w) {
+        b.cx -= (ext.maxX - viewport.w);
+        const pushingIn = (b.vx > 0) || ((b._pushX || 0) > 0);
+        if (pushingIn) {
+          b.vx = 0;
+        } else {
+          b.vx = -Math.abs(b.vx) * RESTITUTION;
+        }
+      }
+      // Bottom (ground)
+      if (ext.maxY > viewport.h) {
+        b.cy -= (ext.maxY - viewport.h);
+        const pushingIn = (b.vy > 0) || ((b._pushY || 0) > 0);
+        if (pushingIn) {
+          b.vy = 0;
+        } else {
+          b.vy = -Math.abs(b.vy) * RESTITUTION;
+        }
+        b.vx *= GROUND_FRICTION;
+        // Extra angular friction and uprighting toward nearest axis-aligned (0, π/2, π, 3π/2)
+        if (Math.abs(b.vy) < VY_REST_THRESH) {
+          // Base angular damping on ground
+          b.omega *= GROUND_ANGULAR_FRICTION;
+          const a = normalizeAngle(b.angle);
+          // Nearest horizontal vs vertical decision with bias
+          const d0 = Math.abs(shortestAngleDelta(a, 0));
+          const dPi = Math.abs(shortestAngleDelta(a, Math.PI));
+          const dH = Math.min(d0, dPi);
+          const tH = (d0 <= dPi) ? 0 : Math.PI;
+          const d90 = Math.abs(shortestAngleDelta(a, Math.PI / 2));
+          const d270 = Math.abs(shortestAngleDelta(a, -Math.PI / 2));
+          const dV = Math.min(d90, d270);
+          const tV = (d90 <= d270) ? Math.PI / 2 : -Math.PI / 2;
+          const target = (dH <= dV * Math.max(1, UPRIGHT_HORIZONTAL_BIAS)) ? tH : tV;
+          const delta = shortestAngleDelta(a, target);
+          // Apply non-linear spring-like torque toward target: tau = -K * sin(2*delta)
+          const tau = -UPRIGHT_TORQUE_K * Math.sin(2 * delta) - UPRIGHT_TORQUE_DAMP * b.omega;
+          const I = Math.max(1e-6, b.I);
+          const alpha = tau / I;
+          b.omega += alpha * FIXED_DT;
+          // Snap when very close
+          if (Math.abs(delta) < UPRIGHT_SNAP_RAD && Math.abs(b.omega) < 0.35) {
+            b.angle = target;
+            b.omega = 0;
+          }
+        } else {
+          b.omega *= 0.9;
+        }
+      }
+      // Top is open for throw-out; no clamp/bounce
+      // Clear transient push markers
+      delete b._pushX;
+      delete b._pushY;
+    }
+    return bs;
+  }
 
   return (
     <Box
@@ -387,9 +558,16 @@ export default function LandingPage() {
       onMouseLeave={onMouseLeaveLanding}
     >
       {debug && (
-        <Box sx={{ position: 'fixed', top: 8, left: 8, px: 1, py: 0.5, bgcolor: 'rgba(0,0,0,0.6)', color: '#9effa0', fontFamily: 'monospace', fontSize: 12, borderRadius: 1, zIndex: 2000 }}>
+        <Box sx={{ position: 'fixed', top: 8, left: 8, px: 1.5, py: 1, bgcolor: 'rgba(0,0,0,0.6)', color: '#9effa0', fontFamily: 'monospace', fontSize: 12, borderRadius: 1, zIndex: 2000, minWidth: 220 }}>
           <div>FPS: {fps.toFixed(0)}</div>
           <div>Poll: {HOLD_POLL_MS}ms (toggle: {DEBUG_TOGGLE_KEY})</div>
+          <div>GravityY: {GRAVITY_Y}</div>
+          <div>TopZone: {Math.round(TOP_ZONE_FRAC*100)}% mul {TOP_ZONE_UPWARD_MULTIPLIER}</div>
+          <div>Restitution: {RESTITUTION} CollFric: {COLLISION_FRICTION}</div>
+          <div>Damp L/A: {LINEAR_DAMP.toFixed(3)}/{ANGULAR_DAMP.toFixed(3)}</div>
+          <div>Solver: {SOLVER_ITER} slop {PENETRATION_SLOP} bias {POSITION_BIAS}</div>
+          <div>Upright k: {GROUND_UPRIGHT_STRENGTH} snap {UPRIGHT_SNAP_RAD}</div>
+          <div>Upright bias: {UPRIGHT_HORIZONTAL_BIAS} torqueK {UPRIGHT_TORQUE_K} damp {UPRIGHT_TORQUE_DAMP}</div>
         </Box>
       )}
 
